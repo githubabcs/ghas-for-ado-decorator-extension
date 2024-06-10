@@ -1,0 +1,62 @@
+{
+    "manifestVersion": 1,
+    "id": "ghas-for-ado-decorator",
+    "name": "GitHub Advanced Security for Azure DevOps Decorator Tools",
+    "version": "1.0.0",
+    "publisher": "lupascalin",
+    "targets": [
+        {
+            "id": "Microsoft.VisualStudio.Services"
+        }
+    ],    
+    "description": "Decorator extension to automatically inject GitHub Advanced Security tasks into your Continuous Integration (CI) pipelines.",
+    "categories": [
+        "Azure Pipelines"
+    ],
+    "icons": {
+        "default": "extension-icon.png"        
+    },
+    "content": {
+        "details": {
+            "path": "README.md"
+        }
+    },
+    "files": [
+        {
+            "path": "ghas-for-ado-decorator-pre.yml",
+            "addressable": true,
+            "contentType": "text/plain"
+        },
+        {
+            "path": "ghas-for-ado-decorator-post.yml",
+            "addressable": true,
+            "contentType": "text/plain"
+        }, 
+        {
+            "path": "images",
+            "addressable": true
+        }
+    ],
+    "contributions": [
+        {
+            "id": "ghas-for-ado-decorator-pre-task",
+            "type": "ms.azure-pipelines.pipeline-decorator",
+            "targets": [
+                "ms.azure-pipelines-agent-job.pre-job-tasks"
+            ],
+            "properties": {
+                "template": "ghas-for-ado-decorator-pre.yml"
+            }
+        },
+        {
+            "id": "ghas-for-ado-decorator-post-task",
+            "type": "ms.azure-pipelines.pipeline-decorator",
+            "targets": [
+                "ms.azure-pipelines-agent-job.post-job-tasks"
+            ],
+            "properties": {
+                "template": "ghas-for-ado-decorator-post.yml"
+            }
+        }
+    ]
+}

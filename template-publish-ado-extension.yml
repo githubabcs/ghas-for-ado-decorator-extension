@@ -1,0 +1,35 @@
+parameters:
+- name: serviceConnection
+- name: publisherId
+- name: extensionId
+- name: extensionName
+- name: shareWith
+
+steps:
+- checkout: self
+  persistCredentials: true
+  clean: true
+  fetchDepth: 0  
+- task: gitversion/setup@1
+  displayName: 'Install GitTools'
+  inputs:
+    versionSpec: '5.x'
+- task: gitversion/execute@1
+  displayName: 'Calculate SemVer'
+- script: echo Current version is $(GitVersion.SemVer)
+  displayName: 'Display calculated version'  
+- task: TfxInstaller@4
+  inputs:
+    version: '>=v0.9.x'
+- task: PublishAzureDevOpsExtension@4
+  inputs:
+    connectTo: 'VsTeam'
+    connectedServiceName: '${{parameters.serviceConnection}}'
+    fileType: 'manifest'
+    patternManifest: 'vss-extension.json'
+    publisherId: '${{parameters.publisherId}}'
+    extensionId: '${{parameters.extensionId}}'
+    extensionName: '${{parameters.extensionName}}'
+    extensionVersion: '$(GitVersion.SemVer)'
+    updateTasksId: true
+    shareWith: '${{parameters.shareWith}}'

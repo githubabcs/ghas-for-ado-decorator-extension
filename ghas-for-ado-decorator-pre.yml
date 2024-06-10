@@ -1,0 +1,60 @@
+# Use these variables in the main pipeline to control the values of the decorator
+# variables:
+#   system.debugContext: true
+#   - When set to true, the pipeline will run in debug mode. This will display additional information in the logs.
+#   advancedsecurity.enable: true
+#   - When set to true, the pipeline will run the Advanced Security analysis.
+#   advancedsecurity.skip: true
+#   - When set to true, the pipeline will skip the Advanced Security analysis.
+#   advancedsecurity.codeql.language: 'csharp, javascript' 
+#   - Allowed values: csharp, cpp, go, java, javascript, python, ruby, swift.
+#   advancedsecurity.codeql.querysuite: 'security-and-quality'
+#   - Allowed values: code-scanning, security-extended, security-experimental, security-and-quality
+
+# To enable the Advanced Security analysis, set the advancedsecurity.enable variable to true.
+# To skip the Advanced Security analysis, set the advancedsecurity.skip variable to true.
+# To specify the languages to analyze, set the advancedsecurity.codeql.language variable.
+# To specify the query suite to use, set the advancedsecurity.codeql.querysuite variable.
+
+# https://learn.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml#build-variables-devops-services
+# in(variables['Build.Reason'], 'Manual', 'IndividualCI', 'BatchedCI', 'PullRequest')
+# Build.SourceBranch
+# contains(variables['Build.DefinitionName'], 'CI')
+# Build.DefinitionName
+# System.TeamProject - The name of the project that contains this build.
+# System.StageName - A string-based identifier for a stage, typically used for expressing dependencies and accessing output variables.
+
+# Task: https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/advanced-security-codeql-init-v1
+
+steps:
+- ${{ if eq(variables['system.debugContext'], 'true') }}:
+  - task: CmdLine@2
+    displayName: '(injected) Run PRE debug script'
+    #condition: and(succeeded(), eq(variables['system.debugContext'], 'true'))
+    inputs:
+      script: |
+        echo "advancedsecurity.enable: ${{ variables['advancedsecurity.enable'] }}"
+        echo "advancedsecurity.skip: ${{ variables['advancedsecurity.skip'] }}"
+        echo "advancedsecurity.codeql.language: ${{ variables['advancedsecurity.codeql.language'] }}"
+        echo "advancedsecurity.codeql.querysuite: ${{ variables['advancedsecurity.codeql.querysuite'] }}"
+        
+        echo "Build.DefinitionName: ${{ variables['Build.DefinitionName'] }}"
+        echo "Build.SourceBranch: ${{ variables['Build.SourceBranch'] }}"
+        echo "Build.Reason: ${{ variables['Build.Reason'] }}"
+        echo "repository defaultBranch: ${{ resources.repositories['self'].defaultBranch }}"
+        echo "repository ref: ${{ resources.repositories['self'].ref }}"
+        
+        echo "Either above variables do NOT match"
+        echo "OR task 'AdvancedSecurity-Codeql-Init (a34f8529-3300-494f-a460-963e3f5f6928)' is already present in the job"
+
+# (Enabled AND DefaultBranch AND NOT contains Task) 
+#  OR 
+# ((Build Reason OR Definition Name) AND DefaultBranch AND NOT contains Task AND NOT Skip)
+- ${{ if or(  and(eq(variables['advancedsecurity.enable'], 'true'), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'a34f8529-3300-494f-a460-963e3f5f6928'))),     and( or(in(variables['Build.Reason'], 'Manual', 'IndividualCI', 'BatchedCI', 'PullRequest'), contains(variables['Build.DefinitionName'], 'CI')), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'a34f8529-3300-494f-a460-963e3f5f6928')), ne(variables['advancedsecurity.skip'], 'true') )  ) }}:
+  - task: AdvancedSecurity-Codeql-Init@1
+    displayName: '(injected) Advanced Security Initialize CodeQL v1'
+    inputs:
+      ${{ if eq(variables['advancedsecurity.codeql.querysuite'], '') }}:
+        querysuite: 'security-and-quality' 
+      ${{ if eq(variables['advancedsecurity.codeql.language'], '') }}:
+        languages: csharp, javascript 

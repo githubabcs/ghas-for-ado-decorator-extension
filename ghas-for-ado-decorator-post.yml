@@ -1,0 +1,162 @@
+# Use these variables in the main pipeline to control the values of the decorator
+# variables:
+#   system.debugContext: true
+#   - When set to true, the pipeline will run in debug mode. This will display additional information in the logs.
+#   advancedsecurity.enable: true
+#   - When set to true, the pipeline will run the Advanced Security analysis.
+#   advancedsecurity.skip: true
+#   - When set to true, the pipeline will skip the Advanced Security analysis.
+#   advancedsecurity.dependencies.failoncritical.skip: true
+#   - When set to true, the pipeline will skip the Advanced Security Dependency Review (Fail on Critical).
+#   advancedsecurity.codescanning.failoncritical.skip: true
+#   - When set to true, the pipeline will skip the Advanced Security Code Scanning (Fail on Critical).
+#   advancedsecurity.codeql.autobuild.enable: true
+#   - When set to true, the pipeline will run the Advanced Security AutoBuild.
+
+# https://learn.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml#build-variables-devops-services
+# in(variables['Build.Reason'], 'Manual', 'IndividualCI', 'BatchedCI', 'PullRequest')
+# Build.SourceBranch
+# contains(variables['Build.DefinitionName'], 'CI')
+# Build.DefinitionName
+# System.TeamProject - The name of the project that contains this build.
+# System.StageName - A string-based identifier for a stage, typically used for expressing dependencies and accessing output variables.
+
+# https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/advanced-security-codeql-autobuild-v1
+# https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/advanced-security-dependency-scanning-v1
+# https://learn.microsoft.com/en-us/azure/devops/pipelines/tasks/reference/advanced-security-codeql-analyze-v1
+
+steps:
+- ${{ if eq(variables['system.debugContext'], 'true') }}:
+  - task: CmdLine@2
+    displayName: '(injected) Run POST debug script'
+    #condition: and(succeeded(), eq(variables['system.debugContext'], 'true'))
+    inputs:
+      script: |
+        echo "advancedsecurity.enable: ${{ variables['advancedsecurity.enable'] }}"
+        echo "advancedsecurity.skip: ${{ variables['advancedsecurity.skip'] }}"
+        echo "advancedsecurity.codeql.autobuild.enable: ${{ variables['advancedsecurity.codeql.autobuild.enable'] }}"
+        
+        echo "Build.DefinitionName: ${{ variables['Build.DefinitionName'] }}"
+        echo "Build.SourceBranch: ${{ variables['Build.SourceBranch'] }}"
+        echo "Build.Reason: ${{ variables['Build.Reason'] }}"
+        echo "repository defaultBranch: ${{ resources.repositories['self'].defaultBranch }}"
+        echo "repository ref: ${{ resources.repositories['self'].ref }}"
+        
+        echo "Either above variables do NOT match"
+        echo "OR task 'AdvancedSecurity-Dependency-Scanning (f97aace4-962a-441b-9141-b842d806b9c7)' is already present in the job"
+        echo "OR task 'AdvancedSecurity-Codeql-Analyze (a9efc1ef-3900-494f-a460-963e3f5f6928)' is already present in the job"
+        echo "OR task 'AdvancedSecurity-Codeql-Autobuild (a63ec2fb-3600-494f-a460-963e3f5f6928)' is already present in the job"
+
+# (Enabled AND DefaultBranch AND NOT contains Task) 
+#  OR 
+# ((Build Reason OR Definition Name) AND DefaultBranch AND NOT contains Task AND NOT Skip)
+
+- ${{ if or(  and(eq(variables['advancedsecurity.enable'], 'true'), eq(variables['advancedsecurity.codeql.autobuild.enable'], 'true'), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'a63ec2fb-3600-494f-a460-963e3f5f6928'))),     and( eq(variables['advancedsecurity.codeql.autobuild.enable'], 'true'), or(in(variables['Build.Reason'], 'Manual', 'IndividualCI', 'BatchedCI', 'PullRequest'), contains(variables['Build.DefinitionName'], 'CI')), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'a63ec2fb-3600-494f-a460-963e3f5f6928')), ne(variables['advancedsecurity.skip'], 'true') )  ) }}:
+  - task: AdvancedSecurity-Codeql-Autobuild@1
+    displayName: '(injected) Advanced Security AutoBuild v1'
+
+- ${{ if or(  and(eq(variables['advancedsecurity.enable'], 'true'), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'f97aace4-962a-441b-9141-b842d806b9c7'))),     and( or(in(variables['Build.Reason'], 'Manual', 'IndividualCI', 'BatchedCI', 'PullRequest'), contains(variables['Build.DefinitionName'], 'CI')), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'f97aace4-962a-441b-9141-b842d806b9c7')), ne(variables['advancedsecurity.skip'], 'true') )  ) }}:
+  - task: AdvancedSecurity-Dependency-Scanning@1
+    displayName: '(injected) Advanced Security Dependency Scanning v1'
+  
+  - task: PowerShell@2
+    displayName: '(injected) Advanced Security Dependency Review (Fail on Critical)'
+    condition: and(succeeded(), ne(variables['advancedsecurity.dependencies.failoncritical.skip'], 'true'))
+    inputs:
+      targetType: 'inline'
+      failOnStderr: true
+      pwsh: true
+      script: |
+        $organization = [regex]::Match("$(System.CollectionUri)", "(?<=\/)[^\/]+(?=\/$)").Value
+        $teamProject = "$(System.TeamProject)"
+        $repoID = "$(Build.Repository.ID)"
+        $branchname= "$(Build.SourceBranchName)"
+        $accessToken = "Bearer $(System.AccessToken)"
+
+        $AdvSecEnablement = "https://advsec.dev.azure.com/$($organization)/$($teamProject)/_apis/management/repositories/$($repoID)/enablement"
+        
+        Write-Host "AdvSec Enablement URL: $AdvSecEnablement"
+        $response = Invoke-RestMethod -Uri $AdvSecEnablement -Headers @{Authorization = $accessToken}   -ContentType "application/json" -Method Get
+        Write-Host "Response: $response"
+
+        $isEnabled =  $response.advSecEnabled -eq "True"
+        Write-Host "AdvSecEnablement: $isEnabled"
+
+        if ($isEnabled)
+        {
+            $CriticalURL = "https://advsec.dev.azure.com/$($organization)/$($teamProject)/_apis/alert/Repositories/$($repoID)/Alerts?criteria.alertType=dependency&criteria.branchName=$($branchname)&criteria.onlyDefaultBranchAlerts=true&top=100&orderBy=severity&criteria.states=active"
+
+            Write-Host "AdvSec Alerts URL: $CriticalURL"
+            $response = Invoke-RestMethod -Uri $CriticalURL -Headers @{Authorization = $accessToken}   -ContentType "application/json" -Method Get
+            Write-Host "Response: $response"
+
+            $filteredData = $response.value | Where-Object { $_.severity -eq "critical" }
+
+            if ($($filteredData.Count) -gt 0)
+            {
+                Write-Host "##[error]Found [$($filteredData.Count)] critical dependency vulnerabilities."
+                Write-Host "##[error]CRITICAL: Build Failed"
+                exit 1
+            }
+            else 
+            {
+                Write-Host "##[section]No critical dependency vulnerabilities found."
+            }
+        }
+        else 
+        {
+            Write-Host "##[warning]Advanced Security not enabled on this repository."
+        }
+
+- ${{ if or(  and(eq(variables['advancedsecurity.enable'], 'true'), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'a9efc1ef-3900-494f-a460-963e3f5f6928'))),     and( or(in(variables['Build.Reason'], 'Manual', 'IndividualCI', 'BatchedCI', 'PullRequest'), contains(variables['Build.DefinitionName'], 'CI')), eq(resources.repositories['self'].ref, resources.repositories['self'].defaultBranch), not(containsValue(job.steps.*.task.id, 'a9efc1ef-3900-494f-a460-963e3f5f6928')), ne(variables['advancedsecurity.skip'], 'true') )  ) }}:
+  - task: AdvancedSecurity-Codeql-Analyze@1
+    displayName: '(injected) Advanced Security Perform CodeQL Analysis v1'
+  
+  - task: PowerShell@2
+    displayName: '(injected) Advanced Security Code Scanning (Fail on Critical)'
+    condition: and(succeeded(), ne(variables['advancedsecurity.codescanning.failoncritical.skip'], 'true'))
+    inputs:
+      targetType: 'inline'
+      failOnStderr: true
+      pwsh: true
+      script: |
+        $organization = [regex]::Match("$(System.CollectionUri)", "(?<=\/)[^\/]+(?=\/$)").Value
+        $teamProject = "$(System.TeamProject)"
+        $repoID = "$(Build.Repository.ID)"
+        $branchname= "$(Build.SourceBranchName)"
+        $accessToken = "Bearer $(System.AccessToken)"
+
+        $AdvSecEnablement = "https://advsec.dev.azure.com/$($organization)/$($teamProject)/_apis/management/repositories/$($repoID)/enablement"
+        
+        Write-Host "AdvSec Enablement URL: $AdvSecEnablement"
+        $response = Invoke-RestMethod -Uri $AdvSecEnablement -Headers @{Authorization = $accessToken}   -ContentType "application/json" -Method Get
+        Write-Host "Response: $response"
+
+        $isEnabled =  $response.advSecEnabled -eq "True"
+        Write-Host "AdvSecEnablement: $isEnabled"
+
+        if ($isEnabled)
+        {
+            $CriticalURL = "https://advsec.dev.azure.com/$($organization)/$($teamProject)/_apis/alert/Repositories/$($repoID)/Alerts?criteria.alertType=code&criteria.branchName=$($branchname)&criteria.onlyDefaultBranchAlerts=true&top=100&orderBy=severity&criteria.states=active"
+
+            Write-Host "AdvSec Alerts URL: $CriticalURL"
+            $response = Invoke-RestMethod -Uri $CriticalURL -Headers @{Authorization = $accessToken}   -ContentType "application/json" -Method Get
+            Write-Host "Response: $response"
+
+            $filteredData = $response.value | Where-Object { $_.severity -eq "critical" }
+
+            if ($($filteredData.Count) -gt 0)
+            {
+                Write-Host "##[error]Found [$($filteredData.Count)] critical code scanning vulnerabilities."
+                Write-Host "##[error]CRITICAL: Build Failed"
+                exit 1
+            }
+            else 
+            {
+                Write-Host "##[section]No critical code scanning vulnerabilities found."
+            }
+        }
+        else 
+        {
+            Write-Host "##[warning]Advanced Security not enabled on this repository."
+        }

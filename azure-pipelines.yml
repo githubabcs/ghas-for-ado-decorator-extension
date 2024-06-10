@@ -1,0 +1,81 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  extensionName: GitHub Advanced Security for Azure DevOps Decorator Tools
+  extensionId: ghas-for-ado-decorator
+  publisherId: lupascalin
+  shareWith: lupascalin
+  serviceConnection: 'SC-Marketplace-Publishing'
+
+stages :
+- stage: get_and_set_version
+  displayName: Calculate Version
+  dependsOn: []
+  jobs:
+  - job: set_tag_for_version
+    displayName: Calculate and set git version
+    steps:
+    - checkout: self
+      persistCredentials: true
+      fetchDepth: 0 
+    - task: gitversion/setup@1
+      displayName: 'Install GitTools'
+      inputs:
+        versionSpec: '5.x'
+    - task: gitversion/execute@1
+      displayName: 'Calculate SemVer'
+    - script: echo Current version is $(GitVersion.SemVer)
+      displayName: 'Display calculated version'
+    - task: CmdLine@2
+      displayName: Init git global config
+      inputs:
+        script: |
+          git config --global user.email $(Build.RequestedForEmail)
+          git config --global user.name $(Build.RequestedFor)
+    - task: CmdLine@2
+      enabled: true
+      displayName: Create Git tag for current version
+      inputs:
+        script: |
+          git tag -a $(GitVersion.SemVer) -m "Release version $(GitVersion.SemVer)"
+          git push origin $(GitVersion.SemVer)    
+
+- stage: publish_dev_extension
+  displayName: 'Build and Publish ADO extension (Dev)'
+  dependsOn: [get_and_set_version]
+  jobs:
+  - deployment: deploy_dev_extension
+    environment: 'DEV-ghas-for-ado-decorator-extension'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: template-publish-ado-extension.yml
+            parameters:
+              serviceConnection: '$(serviceConnection)'
+              publisherId: '$(publisherId)'
+              extensionId: '$(extensionId)-dev'
+              extensionName: ' (DEV) $(extensionName)'
+              shareWith: '$(shareWith)'
+
+- stage: publish_prod_extension
+  displayName: 'Build and Publish ADO extension (Prod)'
+  dependsOn: [publish_dev_extension]
+  jobs:
+  - deployment: deploy_prod_extension
+    environment: 'PROD-ghas-for-ado-decorator-extension'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: template-publish-ado-extension.yml
+            parameters:
+              serviceConnection: '$(serviceConnection)'
+              publisherId: '$(publisherId)'
+              extensionId: '$(extensionId)'
+              extensionName: '$(extensionName)'
+              shareWith: '$(shareWith)'
